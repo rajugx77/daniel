@@ -1,0 +1,58 @@
+# Run the tsm status -v command and capture the output
+$statusOutput = tsm status -v
+
+# Use regex to extract hostnames after "nodeX:"
+$hostnames = $statusOutput -split "`n" | ForEach-Object {
+    if ($_ -match "node\d+:\s*(\S+)") {
+        $matches[1]  # Captures the hostname part (FQDN or short hostname)
+    }
+}
+
+# Function to stop and start services remotely on a node
+function Stop-Start-Service {
+    param (
+        [string]$hostname
+    )
+
+    # Define the command to stop and start tabadminagent_0
+    $stopCommand = "sc \\$hostname stop tabadminagent_0"
+    $startCommand = "sc \\$hostname start tabadminagent_0"
+    
+    # Stop the service
+    try {
+        Write-Host "Stopping tabadminagent_0 on $hostname..."
+        Invoke-Expression $stopCommand
+        
+        # Wait for the service to stop completely
+        $isStopped = $false
+        while (-not $isStopped) {
+            # Check if the service is stopped
+            $serviceStatus = Invoke-Expression "sc \\$hostname query tabadminagent_0" | Select-String "STATE"
+            if ($serviceStatus -match "STOPPED") {
+                $isStopped = $true
+                Write-Host "tabadminagent_0 on $hostname has been stopped."
+            } else {
+                Write-Host "Waiting for tabadminagent_0 on $hostname to stop..."
+                Start-Sleep -Seconds 5  # Wait for 5 seconds before checking again
+            }
+        }
+
+        # Start the service after it's fully stopped
+        Write-Host "Starting tabadminagent_0 on $hostname..."
+        Invoke-Expression $startCommand
+        Write-Host "tabadminagent_0 service has been started on $hostname."
+    }
+    catch {
+        Write-Host "Error occurred while stopping or starting service on $hostname: $_"
+    }
+}
+
+# Loop through each hostname and perform the stop/start on each node
+foreach ($hostname in $hostnames) {
+    Stop-Start-Service -hostname $hostname
+    Start-Sleep -Seconds 5  # Wait for 5 seconds before moving to the next node
+}
+
+# Check the status again after stopping and starting the services
+Write-Host "Checking the status of Tableau services after restart..."
+tsm status -v
